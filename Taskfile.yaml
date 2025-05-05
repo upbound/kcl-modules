@@ -1,0 +1,68 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Run all processing tasks
+    deps:
+      - task: process-repo
+        vars:
+          REPO_URL: 'https://github.com/upbound/spaces.git'
+          TAGS: 'v1.12.0 v1.11.3 v1.10.4'
+          PKG_SUBDIR: 'package'
+      - task: process-repo
+        vars:
+          REPO_URL: 'https://github.com/crossplane/crossplane.git'
+          TAGS: 'v1.19.1 v1.19.0 v1.18.4'
+          PKG_SUBDIR: 'cluster'
+
+  process-repo:
+    desc: Clone and process tags from a given repo
+    vars:
+      REPO_NAME: '{{trimSuffix ".git" (base .REPO_URL)}}'
+      DEST_BASE: '{{.PWD}}/{{.REPO_NAME}}'
+    cmds:
+      - |
+        mkdir -p {{.DEST_BASE}}
+        for TAG in {{.TAGS}}; do
+          echo "Processing tag $TAG from {{.REPO_URL}}..."
+
+          TEMP_DIR=$(mktemp -d)
+
+          if ! git clone --depth 1 --branch "$TAG" "{{.REPO_URL}}" "$TEMP_DIR"; then
+            echo "Failed to clone $TAG"
+            rm -rf "$TEMP_DIR"
+            continue
+          fi
+
+          PKG_DIR="$TEMP_DIR/{{.PKG_SUBDIR}}"
+          if [ ! -d "$PKG_DIR" ]; then
+            echo "Package directory not found at $PKG_DIR for tag $TAG"
+            rm -rf "$TEMP_DIR"
+            continue
+          fi
+
+          pushd "$PKG_DIR" > /dev/null
+          if ! kcl import -m crd -s crds; then
+            echo "kcl failed on tag $TAG"
+            popd > /dev/null
+            rm -rf "$TEMP_DIR"
+            continue
+          fi
+          popd > /dev/null
+
+          VERSION="${TAG#v}"
+          DEST_DIR="{{.DEST_BASE}}/$VERSION"
+          mkdir -p "$DEST_DIR"
+          cp -r "$PKG_DIR/models/"* "$DEST_DIR/" || echo "No models found for $TAG"
+
+          # Write kcl.mod file
+          KCL_MOD_FILE="$DEST_DIR/kcl.mod"
+          echo "[package]" > "$KCL_MOD_FILE"
+          echo "name = \"kcl-modules_{{.REPO_NAME}}\"" >> "$KCL_MOD_FILE"
+          echo "edition = \"*\"" >> "$KCL_MOD_FILE"
+          echo "version = \"$VERSION\"" >> "$KCL_MOD_FILE"
+          echo "description = \"\`kcl-modules_{{.REPO_NAME}}\` is a KCL module contains all the resources for {{.REPO_NAME}}.\"" >> "$KCL_MOD_FILE"
+
+          echo "Finished processing $TAG from {{.REPO_URL}}, output in $DEST_DIR"
+          rm -rf "$TEMP_DIR"
+        done
