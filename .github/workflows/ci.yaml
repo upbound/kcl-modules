@@ -26,11 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
       - name: Login
         if: env.UP_ROBOT_ID != '' && env.UP_API_TOKEN != ''
         run: kcl registry login -u ${{ env.UP_ROBOT_ID }} -p ${{ env.UP_API_TOKEN }} xpkg.upbound.io
